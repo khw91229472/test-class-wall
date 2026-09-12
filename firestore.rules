@@ -30,7 +30,7 @@ service cloud.firestore {
           (isStudent() && request.resource.data.uid == request.auth.uid)
         )
         && request.resource.data.keys().hasAll(['text', 'createdAt'])
-        && request.resource.data.keys().hasOnly(['text', 'createdAt', 'uid'])
+        && request.resource.data.keys().hasOnly(['text', 'createdAt', 'uid', 'aiComment'])
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 5
         && request.resource.data.text.size() <= 50

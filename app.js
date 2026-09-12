@@ -11,6 +11,7 @@ import {
   addDoc,
   getDocs,
   deleteDoc,
+  updateDoc,
   doc,
   query,
   orderBy
@@ -132,6 +133,7 @@ function makeMemo(memo) {
 
   if (canDelete) {
     const del = document.createElement("button");
+    del.className = "del-btn";
     del.textContent = "×";
     del.title = isTeacher && !isMyMemo ? "교사 권한으로 삭제" : "내 메모 삭제";
     del.addEventListener("click", async function () {
@@ -145,7 +147,120 @@ function makeMemo(memo) {
   span.textContent = memo.text;
   div.appendChild(span);
 
+  // 이미 생성된 AI 코멘트가 있다면 표시
+  if (memo.aiComment) {
+    const commentBox = document.createElement("div");
+    commentBox.className = "ai-comment";
+    commentBox.textContent = "🤖 AI 코멘트: " + memo.aiComment;
+    div.appendChild(commentBox);
+  }
+
+  // 교사에게만 [🤖 AI 코멘트 달기] 버튼 표시
+  if (isTeacher) {
+    const aiBtn = document.createElement("button");
+    aiBtn.className = "ai-btn";
+    aiBtn.textContent = memo.aiComment ? "🤖 AI 코멘트 다시 달기" : "🤖 AI 코멘트 달기";
+    aiBtn.addEventListener("click", async function () {
+      aiBtn.disabled = true;
+      aiBtn.textContent = "🤖 코멘트 작성 중...";
+
+      try {
+        await addAiComment(memo);
+        await render();
+      } catch (error) {
+        console.error("AI 코멘트 생성 오류:", error);
+        alert("AI 코멘트를 생성하지 못했습니다: " + error.message);
+        aiBtn.disabled = false;
+        aiBtn.textContent = memo.aiComment ? "🤖 AI 코멘트 다시 달기" : "🤖 AI 코멘트 달기";
+      }
+    });
+    div.appendChild(aiBtn);
+  }
+
   return div;
+}
+
+// ===================================================
+// AI 코멘트 생성 함수 (Gemini API 연동)
+//
+// 교사가 버튼을 클릭했을 때 호출됩니다.
+// 1) Vercel 서버리스 함수(/api/gemini)를 통해 안전하게 코멘트를 받아옵니다.
+// 2) 로컬 환경(Live Server) 등 서버리스 함수 미동작 시 브라우저에서 직접 테스트할 수 있도록 지원합니다.
+// 3) 개인정보 보호: 학생 이름이나 uid는 전달하지 않고 오직 메모 내용(text)만 보냅니다.
+// ===================================================
+async function addAiComment(memo) {
+  let comment = "";
+
+  try {
+    // 1. Vercel 서버리스 함수(/api/gemini) 호출
+    const res = await fetch("/api/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: memo.text })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      comment = data.comment;
+    } else {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `서버 오류 (${res.status})`);
+    }
+  } catch (serverError) {
+    console.warn("Vercel 서버리스 함수 호출 실패 (로컬 환경 등):", serverError);
+
+    // 로컬 Live Server 환경 fallback: 브라우저에서 직접 무료 모델(gemini-1.5-flash) 호출
+    let localApiKey = localStorage.getItem("local_gemini_api_key");
+    if (!localApiKey) {
+      localApiKey = prompt(
+        "로컬 환경(Live Server)에서는 /api/gemini 서버리스 함수가 실행되지 않습니다.\n\n로컬에서 즉시 테스트하시려면 Gemini API 키를 입력해 주세요 (브라우저 로컬 저장소에만 보관됩니다):\n\n* Vercel 배포 시에는 환경변수(GEMINI_API_KEY)로 자동 동작합니다."
+      );
+      if (localApiKey && localApiKey.trim()) {
+        localStorage.setItem("local_gemini_api_key", localApiKey.trim());
+      } else {
+        throw new Error("Gemini API 키가 입력되지 않았습니다.");
+      }
+    }
+
+    const localRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${localApiKey.trim()}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `당신은 학생들을 따뜻하게 격려하는 초·중등학교 교사입니다. 학생이 학급 담벼락에 쓴 다음 메모를 읽고, 따뜻한 칭찬과 응원의 한마디(1~2문장의 친근한 존댓말)를 남겨주세요.\n\n메모: "${memo.text}"`
+                }
+              ]
+            }
+          ]
+        })
+      }
+    );
+
+    if (!localRes.ok) {
+      const localErr = await localRes.json().catch(() => ({}));
+      if (localRes.status === 400 || localRes.status === 403) {
+        localStorage.removeItem("local_gemini_api_key");
+      }
+      throw new Error(localErr.error?.message || "Gemini API 호출에 실패했습니다.");
+    }
+
+    const localData = await localRes.json();
+    comment = localData.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  }
+
+  if (!comment) {
+    throw new Error("생성된 코멘트가 없습니다.");
+  }
+
+  // Firestore의 해당 메모 문서에 aiComment 필드 업데이트
+  await updateDoc(doc(db, "memos", memo.id), {
+    aiComment: comment
+  });
 }
 
 
