@@ -51,10 +51,15 @@ async function loadMemos() {
 }
 
 // 메모를 새로 씁니다.
+// 입력 내용이 5글자 이상일 때만 Firestore에 저장합니다.
 // 백엔드 2: 여기에 "누가 썼는지"(uid)를 함께 저장하게 됩니다.
 async function addMemo(text) {
+  if (!text || text.trim().length < 5) {
+    throw new Error("메모는 5글자 이상이어야 합니다.");
+  }
+
   await addDoc(collection(db, "memos"), {
-    text: text,
+    text: text.trim(),
     createdAt: Date.now()
   });
 }
@@ -115,9 +120,20 @@ input.addEventListener("keydown", async function (e) {
     const text = input.value.trim();
     if (text === "") return;
 
-    await addMemo(text);
-    input.value = "";
-    await render();
+    // 5글자 이상인지 클라이언트에서 1차 검사
+    if (text.length < 5) {
+      alert("메모는 5글자 이상 입력해 주세요.");
+      return;
+    }
+
+    try {
+      await addMemo(text);
+      input.value = "";
+      await render();
+    } catch (error) {
+      console.error("메모 저장 실패:", error);
+      alert("메모를 저장하지 못했습니다. (5글자 이상 입력했는지 확인해 주세요)");
+    }
   }
 });
 
