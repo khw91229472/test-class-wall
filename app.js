@@ -42,6 +42,21 @@ const provider = new GoogleAuthProvider();
 // 현재 로그인한 사용자 정보
 let currentUser = null;
 
+// ===================================================
+// 사용자 역할 구분 (UID 기준: 교사 teacher / 학생 student)
+// ===================================================
+
+// 교사 UID 목록 (교사 권한을 부여할 구글 계정 UID)
+const TEACHER_UIDS = [
+  "5KZWUvaJsGVhfd7Gk9HIJTsIwtY2" // 기본 교사 계정
+];
+
+// 사용자의 역할을 확인하는 함수 ('teacher' 또는 'student')
+function getUserRole(user) {
+  if (!user) return null;
+  return TEACHER_UIDS.includes(user.uid) ? "teacher" : "student";
+}
+
 
 // ===================================================
 // 데이터를 다루는 함수 세 개 (Firestore 연동)
@@ -109,13 +124,16 @@ function makeMemo(memo) {
   const div = document.createElement("div");
   div.className = "memo";
 
-  // 내가 쓴 메모이거나, uid가 없는 기존 메모인 경우에만 삭제 버튼 표시
-  const canDelete = !memo.uid || (currentUser && memo.uid === currentUser.uid);
+  const role = getUserRole(currentUser);
+  // 교사는 모든 메모 삭제 가능, 학생은 본인이 작성한 메모만 삭제 가능 (다른 사람 것은 건들지 못함)
+  const isTeacher = role === "teacher";
+  const isMyMemo = currentUser && memo.uid === currentUser.uid;
+  const canDelete = isTeacher || isMyMemo;
 
   if (canDelete) {
     const del = document.createElement("button");
     del.textContent = "×";
-    del.title = "메모 삭제";
+    del.title = isTeacher && !isMyMemo ? "교사 권한으로 삭제" : "내 메모 삭제";
     del.addEventListener("click", async function () {
       await deleteMemo(memo.id);
       await render();
@@ -141,9 +159,12 @@ function renderUserArea() {
   userArea.innerHTML = "";
 
   if (currentUser) {
-    // 로그인된 상태: 사용자 이름과 로그아웃 버튼 표시
+    const role = getUserRole(currentUser);
+    const roleBadge = role === "teacher" ? "👨‍🏫 교사" : "🧑‍🎓 학생";
+
+    // 로그인된 상태: 역할, 사용자 이름과 로그아웃 버튼 표시
     const greeting = document.createElement("span");
-    greeting.textContent = (currentUser.displayName || "로그인 사용자") + "님 환영합니다!";
+    greeting.textContent = `[${roleBadge}] ${currentUser.displayName || "사용자"}님 환영합니다!`;
 
     const logoutBtn = document.createElement("button");
     logoutBtn.textContent = "로그아웃";
