@@ -15,6 +15,13 @@ import {
   query,
   orderBy
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 
 // Firebase 설정 정보
 const firebaseConfig = {
@@ -26,9 +33,14 @@ const firebaseConfig = {
   appId: "1:474856369491:web:7c228337d9050cfff445a6"
 };
 
-// Firebase 및 Firestore 초기화
+// Firebase 및 서비스 초기화
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
+const provider = new GoogleAuthProvider();
+
+// 현재 로그인한 사용자 정보
+let currentUser = null;
 
 
 // ===================================================
@@ -58,10 +70,17 @@ async function addMemo(text) {
     throw new Error("메모는 5글자 이상이어야 합니다.");
   }
 
-  await addDoc(collection(db, "memos"), {
+  const memoData = {
     text: text.trim(),
     createdAt: Date.now()
-  });
+  };
+
+  // 로그인한 사용자가 있다면 uid를 함께 저장
+  if (currentUser) {
+    memoData.uid = currentUser.uid;
+  }
+
+  await addDoc(collection(db, "memos"), memoData);
 }
 
 // 메모를 지웁니다.
@@ -90,13 +109,19 @@ function makeMemo(memo) {
   const div = document.createElement("div");
   div.className = "memo";
 
-  const del = document.createElement("button");
-  del.textContent = "×";
-  del.addEventListener("click", async function () {
-    await deleteMemo(memo.id);
-    await render();
-  });
-  div.appendChild(del);
+  // 내가 쓴 메모이거나, uid가 없는 기존 메모인 경우에만 삭제 버튼 표시
+  const canDelete = !memo.uid || (currentUser && memo.uid === currentUser.uid);
+
+  if (canDelete) {
+    const del = document.createElement("button");
+    del.textContent = "×";
+    del.title = "메모 삭제";
+    del.addEventListener("click", async function () {
+      await deleteMemo(memo.id);
+      await render();
+    });
+    div.appendChild(del);
+  }
 
   const span = document.createElement("span");
   span.textContent = memo.text;
@@ -104,6 +129,61 @@ function makeMemo(memo) {
 
   return div;
 }
+
+
+// ===================================================
+// 사용자 로그인 영역 (백엔드 2: Google 로그인)
+// ===================================================
+
+const userArea = document.getElementById("userArea");
+
+function renderUserArea() {
+  userArea.innerHTML = "";
+
+  if (currentUser) {
+    // 로그인된 상태: 사용자 이름과 로그아웃 버튼 표시
+    const greeting = document.createElement("span");
+    greeting.textContent = (currentUser.displayName || "로그인 사용자") + "님 환영합니다!";
+
+    const logoutBtn = document.createElement("button");
+    logoutBtn.textContent = "로그아웃";
+    logoutBtn.addEventListener("click", async function () {
+      try {
+        await signOut(auth);
+      } catch (error) {
+        console.error("로그아웃 실패:", error);
+      }
+    });
+
+    userArea.appendChild(greeting);
+    userArea.appendChild(logoutBtn);
+  } else {
+    // 로그아웃된 상태: 구글 로그인 버튼 표시
+    const guide = document.createElement("span");
+    guide.textContent = "메모를 남기려면 로그인해 주세요.";
+
+    const loginBtn = document.createElement("button");
+    loginBtn.textContent = "Google 로그인";
+    loginBtn.addEventListener("click", async function () {
+      try {
+        await signInWithPopup(auth, provider);
+      } catch (error) {
+        console.error("Google 로그인 실패:", error);
+        alert("로그인에 실패했습니다: " + error.message);
+      }
+    });
+
+    userArea.appendChild(guide);
+    userArea.appendChild(loginBtn);
+  }
+}
+
+// 로그인 상태 변경 감지
+onAuthStateChanged(auth, function (user) {
+  currentUser = user;
+  renderUserArea();
+  render(); // 로그인 상태에 맞춰 삭제 버튼 등 담벼락 갱신
+});
 
 
 // ===================================================
@@ -116,6 +196,11 @@ const input = document.getElementById("input");
 input.addEventListener("keydown", async function (e) {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
+
+    if (!currentUser) {
+      alert("로그인 후 메모를 작성할 수 있습니다.");
+      return;
+    }
 
     const text = input.value.trim();
     if (text === "") return;
@@ -132,7 +217,7 @@ input.addEventListener("keydown", async function (e) {
       await render();
     } catch (error) {
       console.error("메모 저장 실패:", error);
-      alert("메모를 저장하지 못했습니다. (5글자 이상 입력했는지 확인해 주세요)");
+      alert("메모를 저장하지 못했습니다: " + error.message);
     }
   }
 });

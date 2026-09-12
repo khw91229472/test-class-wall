@@ -7,10 +7,11 @@ service cloud.firestore {
       allow read, delete: if true;
 
       // 메모를 저장할 때:
-      // 1) text, createdAt 필드만 허용
+      // 1) text, createdAt 필수, uid 선택 필드 허용
       // 2) text는 문자열이고 5글자 이상, 50글자 이하
       // 3) createdAt은 timestamp 또는 숫자(밀리초)
-      allow create: if request.resource.data.keys().hasOnly(['text', 'createdAt'])
+      allow create: if request.resource.data.keys().hasAll(['text', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['text', 'createdAt', 'uid'])
         && request.resource.data.text is string
         && request.resource.data.text.size() >= 5
         && request.resource.data.text.size() <= 50
